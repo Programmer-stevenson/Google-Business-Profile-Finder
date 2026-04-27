@@ -1,6 +1,6 @@
 # Google Business Profile Hunter 🎯
 
-A completed Full-Stack application designed to automate lead generation by extracting data from the Google Places ecosystem. This tool allows users to scrape, visualize, and filter business data to identify high-value targets across any geography.
+A completed Full-Stack application designed to automate lead generation by extracting data from the Google Places ecosystem using their Availble Google Places API. This tool allows users to scrape, visualize, and filter business data to identify high-value targets across any geography.
 
 ## 📝 Project Overview
 This project solves the manual labor of lead prospecting. By interfacing with the **Google Places API**, it "hunts" for business profiles and returns them in a structured, actionable list.
