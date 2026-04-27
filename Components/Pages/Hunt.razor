@@ -1,0 +1,306 @@
+@page "/"
+@using Microsoft.EntityFrameworkCore
+@inject GooglePlacesService PlacesService
+@inject IServiceProvider ServiceProvider
+
+<div class="page-header">
+    <h2>🎯 Hunt for Leads</h2>
+    <p>Search Google Business Profiles and find businesses that need your services</p>
+</div>
+
+<div class="card">
+    <div class="card-title">Search</div>
+    <div class="form-row">
+        <div class="form-group">
+            <label>Industry / Business Type</label>
+            <input type="text" @bind="industry" placeholder="e.g. plumber, restaurant, dentist" />
+        </div>
+        <div class="form-group">
+            <label>City + State</label>
+            <input type="text" @bind="city" placeholder="e.g. Las Vegas NV" />
+        </div>
+        <div class="form-group" style="max-width:120px;">
+            <label>Max Results</label>
+            <input type="number" @bind="maxResults" min="1" max="60" />
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-title">Filters</div>
+    <div class="filter-grid">
+        <label class="filter-chip @(filterNoWebsite ? "active" : "")">
+            <input type="checkbox" @bind="filterNoWebsite" /> ❌ No Website
+        </label>
+        <label class="filter-chip @(filterNoPhone ? "active" : "")">
+            <input type="checkbox" @bind="filterNoPhone" /> 📵 No Phone
+        </label>
+        <label class="filter-chip @(filterNoPhotos ? "active" : "")">
+            <input type="checkbox" @bind="filterNoPhotos" /> 📷 No Photos
+        </label>
+        <label class="filter-chip @(filterHot ? "active" : "")">
+            <input type="checkbox" @bind="filterHot" /> 🔥 HOT Only (50+)
+        </label>
+        <label class="filter-chip @(filterWarm ? "active" : "")">
+            <input type="checkbox" @bind="filterWarm" /> 🟠 WARM+ (30+)
+        </label>
+    </div>
+    <div class="form-row" style="margin-top:14px;">
+        <div class="form-group" style="max-width:180px;">
+            <label>Reviews less than</label>
+            <input type="number" @bind="reviewsLt" placeholder="e.g. 10" />
+        </div>
+        <div class="form-group" style="max-width:180px;">
+            <label>Reviews greater than</label>
+            <input type="number" @bind="reviewsGt" placeholder="e.g. 0" />
+        </div>
+        <div class="form-group" style="max-width:180px;">
+            <label>Reviews equal to</label>
+            <input type="number" @bind="reviewsEq" placeholder="e.g. 0" />
+        </div>
+        <div class="form-group" style="max-width:180px;">
+            <label>Rating less than</label>
+            <input type="number" @bind="ratingLt" step="0.1" placeholder="e.g. 3.5" />
+        </div>
+        <div class="form-group" style="max-width:180px;">
+            <label>Rating greater than</label>
+            <input type="number" @bind="ratingGt" step="0.1" placeholder="e.g. 4.0" />
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="form-row" style="align-items:flex-end;">
+        <div class="form-group" style="max-width:280px;">
+            <label>Sort by</label>
+            <select @bind="sortBy">
+                <option value="score_desc">🔥 Flaw Score (highest)</option>
+                <option value="score_asc">🔥 Flaw Score (lowest)</option>
+                <option value="reviews_asc">💬 Reviews (least)</option>
+                <option value="reviews_desc">💬 Reviews (most)</option>
+                <option value="rating_asc">⭐ Rating (lowest)</option>
+                <option value="rating_desc">⭐ Rating (highest)</option>
+                <option value="name_asc">🔤 Name (A-Z)</option>
+            </select>
+        </div>
+        <div class="form-group" style="flex:0;">
+            <button class="btn btn-primary" @onclick="HuntLeads" disabled="@isLoading">
+                @if (isLoading) { <span class="spinner"></span> <span>Hunting...</span> }
+                else { <span>🔍 Hunt Leads</span> }
+            </button>
+        </div>
+        <div class="form-group" style="flex:0;">
+            <button class="btn btn-secondary" @onclick="ClearFilters">Clear Filters</button>
+        </div>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="card" style="border-color: var(--red);"><span style="color: var(--red);">@errorMessage</span></div>
+}
+
+@if (displayLeads != null)
+{
+    <div class="summary-bar">
+        <span class="summary-item"><strong>Pulled:</strong> @totalPulled</span>
+        <span class="summary-item"><strong>Matched:</strong> @displayLeads.Count</span>
+        <span class="summary-item"><strong>Saved:</strong> @savedCount new</span>
+        <span class="summary-item" style="color:var(--red);">❌ No Website: @displayLeads.Count(l => string.IsNullOrEmpty(l.Website))</span>
+        <span class="summary-item" style="color:var(--red);">🔥 HOT: @displayLeads.Count(l => l.FlawScore >= 50)</span>
+        <span class="summary-item" style="color:var(--orange);">🟠 WARM: @displayLeads.Count(l => l.FlawScore >= 30 && l.FlawScore < 50)</span>
+    </div>
+
+    @if (displayLeads.Count == 0)
+    {
+        <div class="card" style="margin-top:16px;">
+            <div class="empty-state">
+                <div class="icon">🔍</div>
+                <p>No businesses matched your filters.</p>
+                <p style="font-size:12px;">All @totalPulled results were saved — check Saved Leads.</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="card" style="margin-top:16px; padding:0; overflow:hidden;">
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Business</th>
+                            <th>Phone</th>
+                            <th>Website</th>
+                            <th>Rating</th>
+                            <th>Reviews</th>
+                            <th>Score</th>
+                            <th>Grade</th>
+                            <th>Flaws</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @{ int idx = 1; }
+                        @foreach (var lead in displayLeads)
+                        {
+                            <tr>
+                                <td>@(idx++)</td>
+                                <td>
+                                    <strong>@Truncate(lead.Name, 28)</strong><br/>
+                                    <span style="font-size:11px;color:var(--text-dim);">@Truncate(lead.Address, 35)</span>
+                                    @if (!string.IsNullOrEmpty(lead.GoogleMapsUrl))
+                                    {
+                                        <br/><a href="@lead.GoogleMapsUrl" target="_blank" class="site-link">📍 Maps</a>
+                                    }
+                                </td>
+                                <td>@(lead.Phone ?? "N/A")</td>
+                                <td>
+                                    @if (string.IsNullOrEmpty(lead.Website))
+                                    { <span class="badge badge-none">NONE</span> }
+                                    else
+                                    { <a href="@lead.Website" target="_blank" class="site-link">🔗 Visit ↗</a> }
+                                </td>
+                                <td style="color:@(lead.Rating >= 4 ? "var(--green)" : lead.Rating >= 3 ? "var(--yellow)" : "var(--red)")">
+                                    @(lead.Rating?.ToString("F1") ?? "N/A")
+                                </td>
+                                <td style="color:@((lead.ReviewCount ?? 0) >= 25 ? "var(--green)" : (lead.ReviewCount ?? 0) >= 10 ? "var(--yellow)" : "var(--red)")">
+                                    <strong>@(lead.ReviewCount ?? 0)</strong>
+                                </td>
+                                <td><strong style="color:@(lead.FlawScore >= 50 ? "var(--red)" : lead.FlawScore >= 30 ? "var(--orange)" : lead.FlawScore >= 15 ? "var(--yellow)" : "var(--green)")">@lead.FlawScore</strong></td>
+                                <td><span class="badge @GetGradeClass(lead.FlawScore)">@GetGradeLabel(lead.FlawScore)</span></td>
+                                <td>
+                                    @foreach (var flaw in lead.Flaws.Split(" | ", StringSplitOptions.RemoveEmptyEntries))
+                                    { <span class="flaw-tag @(flaw.Contains("NO WEBSITE") ? "critical" : "")">@flaw</span> }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private string industry = "restaurant";
+    private string city = "Las Vegas NV";
+    private int maxResults = 20;
+    private string sortBy = "score_desc";
+    private bool filterNoWebsite, filterNoPhone, filterNoPhotos, filterHot, filterWarm;
+    private int? reviewsLt, reviewsGt, reviewsEq;
+    private double? ratingLt, ratingGt;
+    private bool isLoading;
+    private string? errorMessage;
+    private List<BusinessLead>? displayLeads;
+    private int totalPulled, savedCount;
+
+    private async Task HuntLeads()
+    {
+        if (string.IsNullOrWhiteSpace(industry) || string.IsNullOrWhiteSpace(city)) { errorMessage = "Enter an industry and city."; return; }
+
+        isLoading = true; errorMessage = null; displayLeads = null;
+        StateHasChanged();
+
+        try
+        {
+            var results = await PlacesService.SearchBusinessesAsync(industry, city, maxResults);
+            if (results.Count == 0) { errorMessage = "No results found. Check your API key and query."; isLoading = false; return; }
+
+            totalPulled = results.Count;
+            var allLeads = new List<BusinessLead>();
+            savedCount = 0;
+
+            using var scope = ServiceProvider.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<LeadDbContext>();
+
+            foreach (var place in results)
+            {
+                var (flawScore, flaws) = FlawAnalyzer.Analyze(place);
+                var lead = new BusinessLead
+                {
+                    Name = place.DisplayName?.Text ?? "Unknown",
+                    Address = place.FormattedAddress ?? "N/A",
+                    Phone = place.NationalPhoneNumber ?? place.InternationalPhoneNumber,
+                    Website = place.WebsiteUri,
+                    Rating = place.Rating,
+                    ReviewCount = place.UserRatingCount,
+                    BusinessStatus = place.BusinessStatus,
+                    PlaceId = place.Id,
+                    GoogleMapsUrl = place.GoogleMapsUri,
+                    Industry = industry, City = city,
+                    FlawScore = flawScore,
+                    Flaws = string.Join(" | ", flaws),
+                    ScrapedAt = DateTime.UtcNow
+                };
+                allLeads.Add(lead);
+
+                var existing = await db.Leads.FirstOrDefaultAsync(l => l.PlaceId == place.Id);
+                if (existing == null) { db.Leads.Add(lead); savedCount++; }
+            }
+
+            await db.SaveChangesAsync();
+
+            // Apply filters
+            IEnumerable<BusinessLead> filtered = allLeads;
+            if (filterNoWebsite) filtered = filtered.Where(l => string.IsNullOrEmpty(l.Website));
+            if (filterNoPhone) filtered = filtered.Where(l => string.IsNullOrEmpty(l.Phone));
+            if (filterNoPhotos) filtered = filtered.Where(l => l.Flaws.Contains("No photos") || l.Flaws.Contains("Few photos"));
+            if (filterHot) filtered = filtered.Where(l => l.FlawScore >= 50);
+            if (filterWarm) filtered = filtered.Where(l => l.FlawScore >= 30);
+            if (reviewsLt.HasValue) filtered = filtered.Where(l => (l.ReviewCount ?? 0) < reviewsLt.Value);
+            if (reviewsGt.HasValue) filtered = filtered.Where(l => (l.ReviewCount ?? 0) > reviewsGt.Value);
+            if (reviewsEq.HasValue) filtered = filtered.Where(l => (l.ReviewCount ?? 0) == reviewsEq.Value);
+            if (ratingLt.HasValue) filtered = filtered.Where(l => l.Rating == null || l.Rating < ratingLt.Value);
+            if (ratingGt.HasValue) filtered = filtered.Where(l => l.Rating != null && l.Rating > ratingGt.Value);
+
+            displayLeads = SortLeads(filtered);
+
+            // Log search history
+            var filtersUsed = new List<string>();
+            if (filterNoWebsite) filtersUsed.Add("No Website");
+            if (filterNoPhone) filtersUsed.Add("No Phone");
+            if (filterHot) filtersUsed.Add("HOT 50+");
+            if (filterWarm) filtersUsed.Add("WARM 30+");
+            if (reviewsLt.HasValue) filtersUsed.Add($"Reviews < {reviewsLt}");
+            if (reviewsGt.HasValue) filtersUsed.Add($"Reviews > {reviewsGt}");
+            if (ratingLt.HasValue) filtersUsed.Add($"Rating < {ratingLt}");
+
+            db.SearchHistory.Add(new SearchHistory
+            {
+                Industry = industry, City = city,
+                ResultsFound = totalPulled,
+                ResultsMatched = displayLeads.Count,
+                NewLeadsSaved = savedCount,
+                FiltersUsed = filtersUsed.Count > 0 ? string.Join(" | ", filtersUsed) : "None",
+                SearchedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+        catch (Exception ex) { errorMessage = $"Error: {ex.Message}"; }
+
+        isLoading = false;
+    }
+
+    private List<BusinessLead> SortLeads(IEnumerable<BusinessLead> leads) => sortBy switch
+    {
+        "score_desc" => leads.OrderByDescending(l => l.FlawScore).ToList(),
+        "score_asc" => leads.OrderBy(l => l.FlawScore).ToList(),
+        "reviews_asc" => leads.OrderBy(l => l.ReviewCount ?? 0).ToList(),
+        "reviews_desc" => leads.OrderByDescending(l => l.ReviewCount ?? 0).ToList(),
+        "rating_asc" => leads.OrderBy(l => l.Rating ?? 0).ToList(),
+        "rating_desc" => leads.OrderByDescending(l => l.Rating ?? 0).ToList(),
+        "name_asc" => leads.OrderBy(l => l.Name).ToList(),
+        _ => leads.OrderByDescending(l => l.FlawScore).ToList()
+    };
+
+    private void ClearFilters()
+    {
+        filterNoWebsite = filterNoPhone = filterNoPhotos = filterHot = filterWarm = false;
+        reviewsLt = reviewsGt = reviewsEq = null;
+        ratingLt = ratingGt = null;
+    }
+
+    private string Truncate(string s, int max) => s.Length > max ? s[..max] + "..." : s;
+    private string GetGradeClass(int s) => s >= 50 ? "badge-hot" : s >= 30 ? "badge-warm" : s >= 15 ? "badge-mild" : "badge-low";
+    private string GetGradeLabel(int s) => s >= 50 ? "🔥 HOT" : s >= 30 ? "🟠 WARM" : s >= 15 ? "🟡 MILD" : "🟢 LOW";
+}

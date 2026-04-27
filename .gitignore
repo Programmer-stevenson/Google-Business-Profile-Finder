@@ -1,0 +1,7 @@
+bin/
+obj/
+*.db
+appsettings.Development.json
+*.user
+.vs/
+*.csv

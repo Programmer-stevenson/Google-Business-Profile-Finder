@@ -1,0 +1,343 @@
+@page "/leads"
+@using Microsoft.EntityFrameworkCore
+@inject IServiceProvider ServiceProvider
+@inject IJSRuntime JS
+
+<div class="page-header">
+    <h2>📋 Saved Leads</h2>
+    <p>Browse, filter, and manage all leads in your database</p>
+</div>
+
+<div class="card">
+    <div class="card-title">Filters</div>
+    <div class="filter-grid">
+        <label class="filter-chip @(filterNoWebsite ? "active" : "")">
+            <input type="checkbox" @bind="filterNoWebsite" /> ❌ No Website
+        </label>
+        <label class="filter-chip @(filterNoPhone ? "active" : "")">
+            <input type="checkbox" @bind="filterNoPhone" /> 📵 No Phone
+        </label>
+        <label class="filter-chip @(filterHot ? "active" : "")">
+            <input type="checkbox" @bind="filterHot" /> 🔥 HOT Only
+        </label>
+        <label class="filter-chip @(filterWarm ? "active" : "")">
+            <input type="checkbox" @bind="filterWarm" /> 🟠 WARM+
+        </label>
+        <label class="filter-chip @(filterNotContacted ? "active" : "")">
+            <input type="checkbox" @bind="filterNotContacted" /> 📨 Not Contacted
+        </label>
+        <label class="filter-chip @(filterContacted ? "active" : "")">
+            <input type="checkbox" @bind="filterContacted" /> ✅ Contacted
+        </label>
+    </div>
+    <div class="form-row" style="margin-top:14px;">
+        <div class="form-group" style="max-width:180px;">
+            <label>Reviews less than</label>
+            <input type="number" @bind="reviewsLt" placeholder="e.g. 10" />
+        </div>
+        <div class="form-group" style="max-width:180px;">
+            <label>Reviews greater than</label>
+            <input type="number" @bind="reviewsGt" placeholder="e.g. 0" />
+        </div>
+        <div class="form-group" style="max-width:180px;">
+            <label>Rating less than</label>
+            <input type="number" @bind="ratingLt" step="0.1" placeholder="e.g. 3.5" />
+        </div>
+        <div class="form-group" style="max-width:200px;">
+            <label>Industry</label>
+            <select @bind="selectedIndustry">
+                <option value="">All Industries</option>
+                @foreach (var ind in industries) { <option value="@ind">@ind</option> }
+            </select>
+        </div>
+        <div class="form-group" style="max-width:200px;">
+            <label>City</label>
+            <select @bind="selectedCity">
+                <option value="">All Cities</option>
+                @foreach (var c in cities) { <option value="@c">@c</option> }
+            </select>
+        </div>
+        <div class="form-group" style="max-width:240px;">
+            <label>Sort by</label>
+            <select @bind="sortBy">
+                <option value="score_desc">Flaw Score (highest)</option>
+                <option value="score_asc">Flaw Score (lowest)</option>
+                <option value="reviews_asc">Reviews (least)</option>
+                <option value="reviews_desc">Reviews (most)</option>
+                <option value="rating_asc">Rating (lowest)</option>
+                <option value="rating_desc">Rating (highest)</option>
+                <option value="name_asc">Name (A-Z)</option>
+                <option value="date_desc">Newest first</option>
+            </select>
+        </div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-primary btn-sm" @onclick="ApplyFilters">Apply Filters</button>
+        <button class="btn btn-secondary btn-sm" @onclick="ClearFilters">Clear</button>
+        <button class="btn btn-success btn-sm" @onclick="ExportCsv">💾 Export CSV</button>
+        <button class="btn btn-danger btn-sm" style="margin-left:auto;" @onclick="DeleteAll">🗑️ Delete All</button>
+    </div>
+</div>
+
+@if (leads == null)
+{
+    <div class="loading"><div class="spinner"></div> Loading...</div>
+}
+else if (leads.Count == 0)
+{
+    <div class="card"><div class="empty-state"><div class="icon">📋</div><p>No leads match your filters.</p></div></div>
+}
+else
+{
+    <div class="summary-bar">
+        <span class="summary-item"><strong>Showing:</strong> @leads.Count</span>
+        <span class="summary-item" style="color:var(--red);">❌ No Website: @leads.Count(l => string.IsNullOrEmpty(l.Website))</span>
+        <span class="summary-item" style="color:var(--red);">🔥 HOT: @leads.Count(l => l.FlawScore >= 50)</span>
+        <span class="summary-item" style="color:var(--green);">✅ Contacted: @leads.Count(l => l.Contacted)</span>
+        <span class="summary-item">Avg Reviews: @leads.Average(l => l.ReviewCount ?? 0).ToString("F0")</span>
+    </div>
+
+    <div class="card" style="margin-top:16px; padding:0; overflow:hidden;">
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Business</th>
+                        <th>Phone</th>
+                        <th>Website</th>
+                        <th>Rating</th>
+                        <th>Reviews</th>
+                        <th>Score</th>
+                        <th>Grade</th>
+                        <th>Flaws</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @{ int idx = 1; }
+                    @foreach (var lead in leads)
+                    {
+                        <tr class="@(lead.Contacted ? "contacted" : "")">
+                            <td>@(idx++)</td>
+                            <td>
+                                <strong>@Truncate(lead.Name, 24)</strong>
+                                @if (!string.IsNullOrEmpty(lead.GoogleMapsUrl))
+                                { <br/><a href="@lead.GoogleMapsUrl" target="_blank" class="site-link">📍 Maps</a> }
+                                @if (!string.IsNullOrEmpty(lead.Notes))
+                                { <br/><span style="font-size:11px;color:var(--gold);">📝 @Truncate(lead.Notes, 30)</span> }
+                            </td>
+                            <td>@(lead.Phone ?? "N/A")</td>
+                            <td>
+                                @if (string.IsNullOrEmpty(lead.Website))
+                                { <span class="badge badge-none">NONE</span> }
+                                else
+                                { <a href="@lead.Website" target="_blank" class="site-link">🔗 Visit ↗</a> }
+                            </td>
+                            <td style="color:@(lead.Rating >= 4 ? "var(--green)" : lead.Rating >= 3 ? "var(--yellow)" : "var(--red)")">
+                                @(lead.Rating?.ToString("F1") ?? "N/A")
+                            </td>
+                            <td style="color:@((lead.ReviewCount ?? 0) >= 25 ? "var(--green)" : (lead.ReviewCount ?? 0) >= 10 ? "var(--yellow)" : "var(--red)")">
+                                <strong>@(lead.ReviewCount ?? 0)</strong>
+                            </td>
+                            <td><strong style="color:@(lead.FlawScore >= 50 ? "var(--red)" : lead.FlawScore >= 30 ? "var(--orange)" : "var(--green)")">@lead.FlawScore</strong></td>
+                            <td><span class="badge @GetGradeClass(lead.FlawScore)">@GetGradeLabel(lead.FlawScore)</span></td>
+                            <td>
+                                @foreach (var flaw in lead.Flaws.Split(" | ", StringSplitOptions.RemoveEmptyEntries))
+                                { <span class="flaw-tag @(flaw.Contains("NO WEBSITE") ? "critical" : "")">@flaw</span> }
+                            </td>
+                            <td>
+                                @if (lead.Contacted)
+                                { <span class="badge badge-contacted">✅ Done</span> }
+                            </td>
+                            <td>
+                                <div class="action-btns">
+                                    <button class="action-btn @(lead.Contacted ? "contacted" : "")" @onclick="() => ToggleContacted(lead)">
+                                        @(lead.Contacted ? "✅" : "📨")
+                                    </button>
+                                    <button class="action-btn" @onclick="() => OpenNotes(lead)">📝</button>
+                                    <button class="action-btn" style="color:var(--red);" @onclick="() => DeleteLead(lead)">🗑️</button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@if (showNotesModal)
+{
+    <div class="modal-overlay" @onclick="CloseNotes">
+        <div class="modal" @onclick:stopPropagation="true">
+            <h3>📝 Notes — @editingLead?.Name</h3>
+            <textarea @bind="editNotes" placeholder="Add notes about this lead..."></textarea>
+            <div class="modal-actions">
+                <button class="btn btn-secondary btn-sm" @onclick="CloseNotes">Cancel</button>
+                <button class="btn btn-primary btn-sm" @onclick="SaveNotes">Save Notes</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<BusinessLead>? leads;
+    private List<string> industries = new(), cities = new();
+    private bool filterNoWebsite, filterNoPhone, filterHot, filterWarm, filterNotContacted, filterContacted;
+    private int? reviewsLt, reviewsGt;
+    private double? ratingLt;
+    private string selectedIndustry = "", selectedCity = "", sortBy = "score_desc";
+
+    // Notes modal
+    private bool showNotesModal;
+    private BusinessLead? editingLead;
+    private string editNotes = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDropdowns();
+        await ApplyFilters();
+    }
+
+    private async Task LoadDropdowns()
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LeadDbContext>();
+        industries = await db.Leads.Select(l => l.Industry).Distinct().ToListAsync();
+        cities = await db.Leads.Select(l => l.City).Distinct().ToListAsync();
+    }
+
+    private async Task ApplyFilters()
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LeadDbContext>();
+        IQueryable<BusinessLead> query = db.Leads;
+
+        if (filterNoWebsite) query = query.Where(l => l.Website == null || l.Website == "");
+        if (filterNoPhone) query = query.Where(l => l.Phone == null || l.Phone == "");
+        if (filterHot) query = query.Where(l => l.FlawScore >= 50);
+        if (filterWarm) query = query.Where(l => l.FlawScore >= 30);
+        if (filterNotContacted) query = query.Where(l => !l.Contacted);
+        if (filterContacted) query = query.Where(l => l.Contacted);
+        if (reviewsLt.HasValue) query = query.Where(l => l.ReviewCount == null || l.ReviewCount < reviewsLt.Value);
+        if (reviewsGt.HasValue) query = query.Where(l => l.ReviewCount != null && l.ReviewCount > reviewsGt.Value);
+        if (ratingLt.HasValue) query = query.Where(l => l.Rating == null || l.Rating < ratingLt.Value);
+        if (!string.IsNullOrEmpty(selectedIndustry)) query = query.Where(l => l.Industry == selectedIndustry);
+        if (!string.IsNullOrEmpty(selectedCity)) query = query.Where(l => l.City == selectedCity);
+
+        leads = sortBy switch
+        {
+            "score_desc" => await query.OrderByDescending(l => l.FlawScore).ToListAsync(),
+            "score_asc" => await query.OrderBy(l => l.FlawScore).ToListAsync(),
+            "reviews_asc" => await query.OrderBy(l => l.ReviewCount).ToListAsync(),
+            "reviews_desc" => await query.OrderByDescending(l => l.ReviewCount).ToListAsync(),
+            "rating_asc" => await query.OrderBy(l => l.Rating).ToListAsync(),
+            "rating_desc" => await query.OrderByDescending(l => l.Rating).ToListAsync(),
+            "name_asc" => await query.OrderBy(l => l.Name).ToListAsync(),
+            "date_desc" => await query.OrderByDescending(l => l.ScrapedAt).ToListAsync(),
+            _ => await query.OrderByDescending(l => l.FlawScore).ToListAsync()
+        };
+    }
+
+    private async Task ToggleContacted(BusinessLead lead)
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LeadDbContext>();
+        var dbLead = await db.Leads.FindAsync(lead.Id);
+        if (dbLead != null)
+        {
+            dbLead.Contacted = !dbLead.Contacted;
+            await db.SaveChangesAsync();
+            lead.Contacted = dbLead.Contacted;
+        }
+    }
+
+    private void OpenNotes(BusinessLead lead)
+    {
+        editingLead = lead;
+        editNotes = lead.Notes ?? "";
+        showNotesModal = true;
+    }
+
+    private void CloseNotes() { showNotesModal = false; editingLead = null; }
+
+    private async Task SaveNotes()
+    {
+        if (editingLead == null) return;
+        using var scope = ServiceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LeadDbContext>();
+        var dbLead = await db.Leads.FindAsync(editingLead.Id);
+        if (dbLead != null)
+        {
+            dbLead.Notes = editNotes;
+            await db.SaveChangesAsync();
+            editingLead.Notes = editNotes;
+        }
+        CloseNotes();
+    }
+
+    private async Task DeleteLead(BusinessLead lead)
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LeadDbContext>();
+        var dbLead = await db.Leads.FindAsync(lead.Id);
+        if (dbLead != null)
+        {
+            db.Leads.Remove(dbLead);
+            await db.SaveChangesAsync();
+            leads?.Remove(lead);
+        }
+    }
+
+    private async Task DeleteAll()
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LeadDbContext>();
+        db.Leads.RemoveRange(db.Leads);
+        await db.SaveChangesAsync();
+        leads = new();
+        industries.Clear(); cities.Clear();
+    }
+
+    private async Task ExportCsv()
+    {
+        if (leads == null || leads.Count == 0) return;
+
+        var csv = new System.Text.StringBuilder();
+        csv.AppendLine("Name,Address,Phone,Website,Rating,Reviews,FlawScore,Grade,Flaws,Industry,City,Contacted,Notes,GoogleMaps");
+
+        foreach (var l in leads)
+        {
+            var name = EscapeCsv(l.Name);
+            var addr = EscapeCsv(l.Address);
+            var notes = EscapeCsv(l.Notes ?? "");
+            var flaws = EscapeCsv(l.Flaws);
+            csv.AppendLine($"{name},{addr},{l.Phone ?? "N/A"},{l.Website ?? "NONE"},{l.Rating?.ToString("F1") ?? "N/A"},{l.ReviewCount ?? 0},{l.FlawScore},{GetGradeLabel(l.FlawScore)},{flaws},{l.Industry},{l.City},{(l.Contacted ? "Yes" : "No")},{notes},{l.GoogleMapsUrl ?? ""}");
+        }
+
+        var filename = $"leads_{DateTime.Now:yyyy-MM-dd_HHmmss}.csv";
+        await JS.InvokeVoidAsync("downloadCsv", filename, csv.ToString());
+    }
+
+    private string EscapeCsv(string s)
+    {
+        if (s.Contains(',') || s.Contains('"'))
+        {
+            return "\"" + s.Replace("\"", "\"\"") + "\"";
+        }
+        return s;
+    }
+
+    private void ClearFilters()
+    {
+        filterNoWebsite = filterNoPhone = filterHot = filterWarm = filterNotContacted = filterContacted = false;
+        reviewsLt = reviewsGt = null; ratingLt = null;
+        selectedIndustry = selectedCity = "";
+    }
+
+    private string Truncate(string s, int max) => s.Length > max ? s[..max] + "..." : s;
+    private string GetGradeClass(int s) => s >= 50 ? "badge-hot" : s >= 30 ? "badge-warm" : s >= 15 ? "badge-mild" : "badge-low";
+    private string GetGradeLabel(int s) => s >= 50 ? "🔥 HOT" : s >= 30 ? "🟠 WARM" : s >= 15 ? "🟡 MILD" : "🟢 LOW";
+}

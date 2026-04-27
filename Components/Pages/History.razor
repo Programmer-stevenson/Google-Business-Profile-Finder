@@ -1,0 +1,90 @@
+@page "/history"
+@using Microsoft.EntityFrameworkCore
+@inject IServiceProvider ServiceProvider
+
+<div class="page-header">
+    <h2>🕐 Search History</h2>
+    <p>Log of every search you've run</p>
+</div>
+
+@if (history == null)
+{
+    <div class="loading"><div class="spinner"></div> Loading...</div>
+}
+else if (history.Count == 0)
+{
+    <div class="card"><div class="empty-state"><div class="icon">🕐</div><p>No searches yet. Go hunt some leads!</p></div></div>
+}
+else
+{
+    <div class="card" style="padding:0; overflow:hidden;">
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Date</th>
+                        <th>Industry</th>
+                        <th>City</th>
+                        <th>Found</th>
+                        <th>Matched</th>
+                        <th>New Saved</th>
+                        <th>Filters Used</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @{ int idx = 1; }
+                    @foreach (var h in history)
+                    {
+                        <tr>
+                            <td>@(idx++)</td>
+                            <td style="white-space:nowrap;">@h.SearchedAt.ToLocalTime().ToString("MMM dd, yyyy h:mm tt")</td>
+                            <td><strong>@h.Industry</strong></td>
+                            <td>@h.City</td>
+                            <td>@h.ResultsFound</td>
+                            <td style="color:@(h.ResultsMatched < h.ResultsFound ? "var(--yellow)" : "var(--green)")">@h.ResultsMatched</td>
+                            <td style="color:var(--green);">@h.NewLeadsSaved</td>
+                            <td>
+                                @if (h.FiltersUsed == "None")
+                                {
+                                    <span style="color:var(--text-dim);">None</span>
+                                }
+                                else
+                                {
+                                    @foreach (var f in h.FiltersUsed.Split(" | "))
+                                    {
+                                        <span class="flaw-tag">@f</span>
+                                    }
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div style="margin-top:16px;">
+        <button class="btn btn-danger btn-sm" @onclick="ClearHistory">🗑️ Clear History</button>
+    </div>
+}
+
+@code {
+    private List<SearchHistory>? history;
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LeadDbContext>();
+        history = await db.SearchHistory.OrderByDescending(h => h.SearchedAt).ToListAsync();
+    }
+
+    private async Task ClearHistory()
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LeadDbContext>();
+        db.SearchHistory.RemoveRange(db.SearchHistory);
+        await db.SaveChangesAsync();
+        history = new();
+    }
+}

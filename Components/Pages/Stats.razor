@@ -1,0 +1,169 @@
+@page "/stats"
+@using Microsoft.EntityFrameworkCore
+@inject IServiceProvider ServiceProvider
+
+<div class="page-header">
+    <h2>📊 Lead Stats</h2>
+    <p>Overview of your lead database</p>
+</div>
+
+@if (totalLeads == 0)
+{
+    <div class="card">
+        <div class="empty-state">
+            <div class="icon">📊</div>
+            <p>No leads yet. Go hunt some!</p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">@totalLeads</div>
+            <div class="stat-label">Total Leads</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color:var(--red);">@hotLeads</div>
+            <div class="stat-label">🔥 HOT (50+)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color:var(--orange);">@warmLeads</div>
+            <div class="stat-label">🟠 WARM (30-49)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color:var(--red);">@noWebsite</div>
+            <div class="stat-label">❌ No Website</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color:var(--red);">@noPhone</div>
+            <div class="stat-label">📵 No Phone</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color:var(--gold);">@avgScore.ToString("F1")</div>
+            <div class="stat-label">Avg Flaw Score</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">@avgReviews.ToString("F0")</div>
+            <div class="stat-label">Avg Reviews</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">@industryCount</div>
+            <div class="stat-label">Industries Searched</div>
+        </div>
+    </div>
+
+    <!-- By Industry breakdown -->
+    <div class="card">
+        <div class="card-title">By Industry</div>
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Industry</th>
+                        <th>Leads</th>
+                        <th>No Website</th>
+                        <th>No Phone</th>
+                        <th>HOT</th>
+                        <th>Avg Score</th>
+                        <th>Avg Reviews</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var group in industryBreakdown)
+                    {
+                        <tr>
+                            <td><strong>@group.Industry</strong></td>
+                            <td>@group.Count</td>
+                            <td style="color:var(--red);">@group.NoWebsite</td>
+                            <td style="color:var(--red);">@group.NoPhone</td>
+                            <td style="color:var(--red);">@group.Hot</td>
+                            <td style="color:var(--gold);">@group.AvgScore.ToString("F1")</td>
+                            <td>@group.AvgReviews.ToString("F0")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- By City breakdown -->
+    <div class="card">
+        <div class="card-title">By City</div>
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>City</th>
+                        <th>Leads</th>
+                        <th>No Website</th>
+                        <th>HOT</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var group in cityBreakdown)
+                    {
+                        <tr>
+                            <td><strong>@group.City</strong></td>
+                            <td>@group.Count</td>
+                            <td style="color:var(--red);">@group.NoWebsite</td>
+                            <td style="color:var(--red);">@group.Hot</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private int totalLeads, hotLeads, warmLeads, noWebsite, noPhone, industryCount;
+    private double avgScore, avgReviews;
+
+    private record IndustryGroup(string Industry, int Count, int NoWebsite, int NoPhone, int Hot, double AvgScore, double AvgReviews);
+    private record CityGroup(string City, int Count, int NoWebsite, int Hot);
+
+    private List<IndustryGroup> industryBreakdown = new();
+    private List<CityGroup> cityBreakdown = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        using var scope = ServiceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<LeadDbContext>();
+        var leads = await db.Leads.ToListAsync();
+
+        totalLeads = leads.Count;
+        if (totalLeads == 0) return;
+
+        hotLeads = leads.Count(l => l.FlawScore >= 50);
+        warmLeads = leads.Count(l => l.FlawScore >= 30 && l.FlawScore < 50);
+        noWebsite = leads.Count(l => string.IsNullOrEmpty(l.Website));
+        noPhone = leads.Count(l => string.IsNullOrEmpty(l.Phone));
+        avgScore = leads.Average(l => l.FlawScore);
+        avgReviews = leads.Average(l => l.ReviewCount ?? 0);
+        industryCount = leads.Select(l => l.Industry).Distinct().Count();
+
+        industryBreakdown = leads
+            .GroupBy(l => l.Industry)
+            .Select(g => new IndustryGroup(
+                g.Key,
+                g.Count(),
+                g.Count(l => string.IsNullOrEmpty(l.Website)),
+                g.Count(l => string.IsNullOrEmpty(l.Phone)),
+                g.Count(l => l.FlawScore >= 50),
+                g.Average(l => l.FlawScore),
+                g.Average(l => l.ReviewCount ?? 0)))
+            .OrderByDescending(g => g.Count)
+            .ToList();
+
+        cityBreakdown = leads
+            .GroupBy(l => l.City)
+            .Select(g => new CityGroup(
+                g.Key,
+                g.Count(),
+                g.Count(l => string.IsNullOrEmpty(l.Website)),
+                g.Count(l => l.FlawScore >= 50)))
+            .OrderByDescending(g => g.Count)
+            .ToList();
+    }
+}
