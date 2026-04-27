@@ -2,12 +2,12 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /source
 
-# Copy everything and restore
+# Copy everything
 COPY . .
-RUN dotnet restore
 
-# Build the project
-RUN dotnet publish -c Release -o /app
+# Explicitly restore and publish the specific project
+RUN dotnet restore LeadHunterUI.csproj
+RUN dotnet publish LeadHunterUI.csproj -c Release -o /app
 
 # Run Stage
 FROM mcr.microsoft.com/dotnet/aspnet:8.0
